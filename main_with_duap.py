@@ -21,95 +21,14 @@ from utils.eval_tools import (
     cap_instruction, cls_instruction, load_img_specific_questions, vqa_agnostic_instruction, 
     plot_loss, postprocess_generation,record_format_summary, record_format_summary_affect
 )
-# from diffusers import StableDiffusionXLPipeline
-# import torch
+
 from PIL import Image
 # from IPython.display import display
 from torchvision import transforms
 import torch.nn.functional as F
 import torch.nn as nn
-# from transformers import ViTFeatureExtractor, ViTModel
 
-# def generate_image(prompt: str) -> Image.Image:
-#     """
-#     Generates an image from a text prompt using SDXL 1.0.
 
-#     Args:
-#         prompt (str): The text description for the image generation.
-
-#     Returns:
-#         Image.Image: The generated PIL image.
-#     """
-#     # Use GPU if available; otherwise fall back on CPU.
-#     device = "cuda" if torch.cuda.is_available() else "cpu"
-#     global pipe
-#     pipe = pipe.to(device)
-
-#     # Generate the image.
-#     result = pipe(prompt=prompt, num_inference_steps=50, guidance_scale=7.5)
-
-#     # Extract the first image from the result.
-#     generated_image = result.images[0]
-#     return generated_image
-
-# def pgd_align_images(budget: float, timesteps: int, gen_img: Image.Image, target_img: Image.Image) -> Image.Image:
-#     """
-#     Aligns ViT embeddings between generated and target images using Projected Gradient Descent (PGD).
-
-#     Args:
-#         budget (float): Maximum allowed perturbation (0-1 range)
-#         timesteps (int): Number of optimization steps
-#         gen_img (Image.Image): Generated image to modify
-#         target_img (Image.Image): Target reference image
-
-#     Returns:
-#         PIL.Image: Modified image with aligned embeddings
-#     """
-#     # Load and preprocess images
-#     transform = transforms.Compose([
-#         transforms.Resize((224, 224)),
-#         transforms.ToTensor()
-#     ])
-
-#     gen_img = transform(gen_img.convert("RGB")).unsqueeze(0)
-#     target_img = transform(target_img.convert("RGB")).unsqueeze(0)
-
-#     # Initialize model
-#     model = ViTModel.from_pretrained("openai/clip-vit-large-patch14")
-#     model.eval()
-
-#     # Get target embedding
-#     with torch.no_grad():
-#         target_embedding = model(pixel_values=target_img).last_hidden_state.mean(dim=1)
-
-#     # Initialize perturbed image
-#     perturbed = gen_img.clone().requires_grad_(True)
-#     optimizer = torch.optim.Adam([perturbed], lr=1)
-
-#     # PGD optimization loop
-#     for i in range(timesteps):
-#         optimizer.zero_grad()
-#         print(i)
-#         # Calculate embedding loss
-#         emb = model(pixel_values=perturbed).last_hidden_state.mean(dim=1)
-#         loss = torch.nn.functional.mse_loss(emb, target_embedding)
-#         loss.backward()
-
-#         # Update with gradient descent
-#         optimizer.step()
-
-#         # Project perturbations to valid range
-#         with torch.no_grad():
-#             delta = torch.clamp(perturbed - gen_img, -budget, budget)
-#             perturbed.copy_(torch.clamp(gen_img + delta, 0, 1))
-
-#     # Convert to PIL image
-#     return transforms.ToPILImage()(perturbed.squeeze())
-
-#%%      
-# 
-# 
-# 
 class MyVisionEncoder(nn.Module):
     def __init__(self, original_encoder):
         super().__init__()
@@ -653,27 +572,27 @@ if __name__=="__main__":
         prompt_num_to_alpha2 = config_args.prompt_num_to_alpha2    
         alpha2 = prompt_num_to_alpha2[prompt_num]
     
-    for target_text in  ["unknown","metaphor"]:
+    
 
-        iter_num = 1701
-        
-        attack(
-            config_args,
-            eval_model = eval_model,
-            max_generation_length = 5,
-            num_beams= 3,
-            length_penalty = -2.0,
-            num_shots = num_shots,
-            alpha1 = 1/255,
-            epsilon = 16/255,
-            fraction=config_args.fraction,
-            iters = iter_num,
-            target = target_text+config_args.eoc,
-            base_dir = f"output/{config_args.model_name}_shots_{num_shots}/{config_args.method}/num_{prompt_num}_{target_text}",
-            alpha2 = alpha2 ,
-            prompt_num=config_args.prompt_num,
-            datasets=(train_dataset,  test_dataset),
-        )
+    iter_num = 1701
+    
+    attack(
+        config_args,
+        eval_model = eval_model,
+        max_generation_length = 5,
+        num_beams= 3,
+        length_penalty = -2.0,
+        num_shots = num_shots,
+        alpha1 = 1/255,
+        epsilon = 16/255,
+        fraction=config_args.fraction,
+        iters = iter_num,
+        target = config_args.target+config_args.eoc,
+        base_dir = f"output/{config_args.model_name}_shots_{num_shots}/{config_args.method}/num_{prompt_num}_{config_args.target}",
+        alpha2 = alpha2 ,
+        prompt_num=config_args.prompt_num,
+        datasets=(train_dataset,  test_dataset),
+    )
 
 
 

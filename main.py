@@ -1,3 +1,4 @@
+#%%
 import argparse
 import importlib
 import json
@@ -116,7 +117,7 @@ def attack(
     iters: int = 200,
     alpha2: float = 0.01,
     fraction: float = 0.01,
-    target: str = "unknown<|endofchunk|>",
+    target: str = "bomb<|endofchunk|>",
     base_dir: str = "./",
     prompt_num: int = 1,
     datasets: Tuple[Dataset, Dataset] = None,
@@ -124,85 +125,12 @@ def attack(
     model_name = args.model_name
     method = args.method
     
+    print(model_name)
     save_perturb_iterations = list(range(900,iters, 200)) 
     cropa_end = 300
     step = max((cropa_end//prompt_num),1)
     cropa_iter = [i for i in range(step,cropa_end+1, step)] # text perturb update iterations 
-    import gc
-    from PIL import Image
-    from torchvision import transforms
-    
-    def pgd_align_images_with_loaded_blip2(budget, timesteps, gen_img_path, target_img_path) -> Image.Image:
-    
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        transform = transforms.Compose([
-                        transforms.Resize((224, 224)),
-                        transforms.ToTensor()
-                    ])
-
-        # Load and preprocess the images.
-        gen_img = gen_img_path.to(device)
-        target_img = transform(target_img_path).unsqueeze(0).to(device)
-
-        # Ensure proper precision – when using CUDA, our images are cast to half.
-        # if device == "cuda":
-        #     gen_img = gen_img.half()
-        #     target_img = target_img.half()
-
-        # Compute the target embedding using BLIP‑2's vision encoder.
-        with torch.no_grad():
-            target_out = eval_model.model.vision_model(pixel_values=target_img)
-            target_embedding = target_out.last_hidden_state.mean(dim=1)
-        print(target_embedding)
-        # Initialize the perturbed image (the one to be optimized).
-        perturbed = gen_img.clone().detach().requires_grad_(True)
-        optimizer = torch.optim.Adam([perturbed], lr=0.1)
-
-        # PGD optimization loop.
-        for i in range(timesteps):
-            optimizer.zero_grad()
-            out = eval_model.model.vision_model(pixel_values=perturbed)
-            emb = out.last_hidden_state.mean(dim=1)
-            loss = torch.nn.functional.mse_loss(emb, target_embedding)
-            loss.backward()
-            optimizer.step()
-            print(i)
-            with torch.no_grad():
-                delta = torch.clamp(perturbed - gen_img, -budget, budget)
-                perturbed.copy_(torch.clamp(gen_img + delta, 0, 1))
-        # Before converting to a PIL image, ensure that:
-        # • There are no NaNs or inf values,
-        # • The tensor is in float32 (ToPILImage works best with that),
-        # • The values are in the [0, 1] range.
-        perturbed = torch.nan_to_num(perturbed, nan=0.0, posinf=1.0, neginf=0.0)
-        perturbed = perturbed.float()  # Convert to float32 if not already.
-
-        # Convert the final perturbed image to a PIL image.
-        modified_image = transforms.ToPILImage()(perturbed.squeeze().cpu())
-
-        # Clean up local variables.
-        del optimizer, perturbed
-        torch.cuda.empty_cache()
-        gc.collect()
-        return modified_image
-    
-    """
-    from diffusers import StableDiffusionXLPipeline
-    import torch
-    from PIL import Image
-    from IPython.display import display
-
-    model_id = "stabilityai/stable-diffusion-xl-base-1.0"
-
-        # Load the pipeline with half precision for speed if using GPU.
-    pipe = StableDiffusionXLPipeline.from_pretrained(
-            model_id,
-            torch_dtype=torch.float16
-        )
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    pipe = pipe.to(device)
-    result = pipe(prompt=target[:-14], num_inference_steps=50, guidance_scale=7.5).images[0]
-    """
+        
     tokenizer = eval_model.tokenizer
     target = target.lower().strip().replace("_", " ")
     target_token_len = len(tokenizer.encode(target)) - 1
@@ -326,32 +254,21 @@ def attack(
                 qformer_input_ids_list.append(qformer_text_encoding["input_ids"])
                 qformer_attention_mask_list.append(qformer_text_encoding["attention_mask"])
             
-        input_x_original = eval_model._prepare_images_no_normalize(item_images).to(device)
-        
-        sdxl_result_path="/teamspace/studios/this_studio/Re-CroPA/sdxl_gen_images/toolate.jpg"
-        gen_img_pil = Image.open(sdxl_result_path).convert("RGB")
-        to_tensor = transforms.ToTensor()
-        gen_img_tensor = to_tensor(gen_img_pil)
-        
         # create a learnable noise tensor and embedding dict
         if model_name in ["blip2","instructblip"]:
-            modified_img = pgd_align_images_with_loaded_blip2(
-                            budget=0.05,
-                            timesteps=150,
-                            gen_img_path= input_x_original ,  # Replace with your path.
-                            target_img_path= gen_img_pil# Replace with your target image path.
-                        )
-            transform = transforms.Compose([
-                        transforms.Resize((224, 224)),
-                        transforms.ToTensor()
-                        ])
-            noise = transform(modified_img).unsqueeze(0).to(device) - input_x_original
-            noise.to(device).requires_grad_()
+            noise = torch.randn([1,3,224,224], requires_grad=True,device = device)
             lm_emb = eval_model.model.language_model.get_input_embeddings()
+        elif model_name in ["clip"]:
+            noise = torch.randn([1,3,224,224], requires_grad=True,device = device)
+            #print("Eval model",eval_model.model)
+            lm_emb = eval_model.model.text_model.embeddings.token_embedding
+
         else:
             noise = torch.randn([1,1,3,224,224], requires_grad=True,device = device)
             lm_emb = eval_model.model.lang_encoder.get_input_embeddings()   
-                    
+            
+        input_x_original = eval_model._prepare_images_no_normalize(item_images).to(device)        
+        
         perturb_list = []
         for i in input_ids_list:
             perturb = torch.zeros_like(lm_emb(i),device="cpu",requires_grad=True)
@@ -362,7 +279,6 @@ def attack(
         access_order = deque(access_order) 
         index_count = 0
         t_ids = []
-        
         for ep in range(iters):
             # get the text index to update
             if index_count != 0 and index_count % prompt_num == 0:
@@ -378,15 +294,20 @@ def attack(
             input_x = input_x_original.clone().detach()
             if model_name=="open_flamingo":
                 input_x[0,-1] = input_x[0,-1] + noise
-            elif model_name in ["instructblip","blip2"]:
+            elif model_name in ["instructblip","blip2", "clip"]:
                 # print(input_x.shape) #[1,3,224,224]
                 input_x = input_x + noise
+                
             labels = labels_list[text_idx]
             input_ids = input_ids_list[text_idx]
             attention_mask = attention_mask_list[text_idx]
             
             inputs_embeds_original = lm_emb(input_ids).clone().detach()
-            text_perturb = torch.tensor(perturb_list[text_idx],requires_grad=True,device=device)
+            if model_name=="clip":
+                text_perturb = perturb_list[text_idx].clone().detach().to(device).requires_grad_(True)
+            else: 
+                text_perturb = torch.tensor(perturb_list[text_idx],requires_grad=True,device=device)
+
             # print(text_perturb.requires_grad) 
             # text_perturb = text_perturb.to(device)
             
@@ -423,6 +344,15 @@ def attack(
                     qformer_attention_mask= qformer_attention_mask_list[text_idx]
                 )[0]
 
+            elif model_name == "clip":
+                # Instead of calling model(...)[0], compute loss via the helper method.
+               loss = eval_model.compute_loss(
+                    inputs_embeds=inputs_embeds,   # if you are perturbing text embeddings
+                    input_ids=input_ids,
+                    pixel_values=input_x,
+                    attention_mask=attention_mask,
+                    labels=labels
+                )
             # total_loss.append(float(loss.item()))
             loss.backward()
             loss_json[img_id].append(float(loss.item()))
@@ -512,6 +442,7 @@ def attack(
 
                         process_function = postprocess_generation
                         new_predictions = list(map(process_function, outputs))
+                        print("new predictions is ", new_predictions)
                         clean_newpredictions = list(map(process_function, clean_outputs)) if not args.quick_eval else None
                         for i in range(len(new_predictions)):
                             target_attack_is_success = False
@@ -593,8 +524,8 @@ if __name__=="__main__":
                         help="The device id of the GPU to use")
     parser.add_argument("--iter_num", type=int, default=300,
                         help="The num of attack iterations")
-    parser.add_argument("--model_name", type=str, default="blip2", #before: instructblip
-                        help="The num of attack iter")
+    parser.add_argument("--model_name", type=str, default="open_flamingo", #before: instructblip
+                        help="Theum of attack iter")
     parser.add_argument("--quick_eval", type=bool, default=False,
                         help="set to false to generate the result given clean images")
     parser.add_argument("--fraction", type=float, default=0.05,
@@ -614,9 +545,7 @@ if __name__=="__main__":
     else:
         config_args.device= get_available_gpus(5000)[0]
     device= f"cuda:{ config_args.device}"
-    print("Device is:", device)
     eval_model = load_model(config_args.device,module,config_args.model_name)
-    print("model loaded")
     train_dataset, test_dataset = load_datasets(config_args)
     num_shots = config_args.shot
     prompt_num = config_args.prompt_num
@@ -626,24 +555,27 @@ if __name__=="__main__":
     else:    
         prompt_num_to_alpha2 = config_args.prompt_num_to_alpha2    
         alpha2 = prompt_num_to_alpha2[prompt_num]
+    
+    #target_text = "bomb"
 
-    for target_text in ["too late"]:
-        iter_num = 1701
-        
-        attack(
-            config_args,
-            eval_model = eval_model,
-            max_generation_length = 5,
-            num_beams= 3,
-            length_penalty = -2.0,
-            num_shots = num_shots,
-            alpha1 = 1/255,
-            epsilon = 16/255,
-            fraction=config_args.fraction,
-            iters = iter_num,
-            target = target_text+config_args.eoc,
-            base_dir = f"output/{config_args.model_name}_shots_{num_shots}/{config_args.method}/num_{prompt_num}_{target_text}",
-            alpha2 = alpha2 ,
-            prompt_num=config_args.prompt_num,
-            datasets=(train_dataset,  test_dataset),
-        )
+    iter_num = 1701
+    
+    attack(
+        config_args,
+        eval_model = eval_model,
+        max_generation_length = 5,
+        num_beams= 3,
+        length_penalty = -2.0,
+        num_shots = num_shots,
+        alpha1 = 1/255,
+        epsilon = 16/255,
+        fraction=config_args.fraction,
+        iters = iter_num,
+        target = config_args.target+config_args.eoc,
+        base_dir = f"output/{config_args.model_name}_shots_{num_shots}/{config_args.method}/num_{prompt_num}_{config_args.target}",
+        alpha2 = alpha2 ,
+        prompt_num=config_args.prompt_num,
+        datasets=(train_dataset,  test_dataset),
+    )
+
+

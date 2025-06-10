@@ -474,36 +474,6 @@ This section guides you through reproducing all experiments: baseline CroPA, sem
 * **CUDA**: ≥ 11.6 (for GPU acceleration)
 * **NVIDIA GPU**: ≥ 40 GB VRAM (e.g., L40S, A100) recommended for large‐scale training.
 
-#### Python Dependencies
-
-Create a new Conda or virtualenv environment:
-
-```bash
-conda create -n revisiting-cropa python=3.9 -y
-conda activate revisiting-cropa
-pip install --upgrade pip
-```
-
-Install required packages:
-
-```bash
-pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu116  
-pip install transformers diffusers accelerate datasets clip-by-openai  
-pip install timm  # for vision encoders  
-pip install scikit-learn scikit-image  
-pip install ftfy regex sentencepiece
-pip install open_clip_torch  # optional if using OpenCLIP  
-```
-
-> **Note**: Exact versions can be found in `requirements.txt`.
->
-> Additional (optional) dependencies for Stable Diffusion XL:
->
-> ```bash
-> pip install diffusers[torch] safetensors  
-> pip install accelerate transformers  
-> ```
-
 ---
 
 ### Installation
@@ -621,124 +591,37 @@ Revisiting-CroPA/
 
 2. **Generate Adversarial Examples**
 
-   ```bash
-   # For Flamingo (target prompts in data/prompts.txt, images in data/images/)
-   bash src/evaluate/eval_cropa.sh --model flamingo --images_dir data/images --prompts data/prompts.txt --iter 2000 --eps 16/255 --step 1/255 --n_prompt_updates 10
-   ```
+The `run_algorithm.sh` script automates the execution of your chosen algorithm with specified parameters.
 
-   * **Arguments**:
+#### 1. Execution
 
-     * `--model`: one of \[blip2, instructblip, flamingo, llava]
-     * `--images_dir`: directory containing clean images
-     * `--prompts`: text file listing target prompts
-     * `--iter`: number of PGD iterations (\$K\$)
-     * `--eps`: \$\epsilon\$ (e.g., 16/255)
-     * `--step`: \$\alpha\_1\$ (image step size, e.g., 1/255)
-     * `--n_prompt_updates`: \$N\$ (update prompt every \$N\$ steps)
+To run an algorithm, use the `run_algorithm.sh` script and pass parameters as command-line arguments.
+
+**Basic Usage:**
+```bash
+./run_algorithm.sh --algorithm=<cropa|duap|init> --model_name=<your_model> 
+```
+
+**Key Parameters:**
+
+* `--algorithm`: Required. Choose `cropa`, `duap`, or `init`.
+* `--model_name`: Specify the model (e.g., `blip2`, `instructblip`).
+* `--device`: Set the GPU ID (e.g., `0`) or `-1` for auto-detect.
+* `--target="your_prompt`: Provide a single target text directly.
+* `--prompt_file=/path/to/prompt.txt`: Use this to read multiple target texts from a file (one per line). The script will run the algorithm for each prompt.
+
+**Example:**
+```bash
+# Run 'cropa' with a specific model and prompts from a file
+./run_algorithm.sh --algorithm=cropa --model_name=blip2 --prompt_file=./my_prompts.txt
+```
 
 3. **View Logs & Results**
 
    * Adversarial examples are saved under `results/cropa_baseline/<model>/`.
-   * ASR tables (CSV) are generated in the same directory.
+   * ASR tables are generated in the same directory.
 
 ---
-
-### Running Enhanced Methods
-
-#### CroPA + Semantic Initialization
-
-```bash
-bash src/evaluate/eval_semantic_init.sh \
-    --model blip2 \
-    --images_dir data/images \
-    --prompts data/prompts.txt \
-    --sdxl_checkpoint checkpoints/sdxl/ \
-    --iter 2000 \
-    --eps 16/255 \
-    --step 1/255 \
-    --n_prompt_updates 10
-```
-
-* **Additional args**:
-
-  * `--sdxl_checkpoint`: Path to SDXL weights.
-  * Internally, the script calls `init_cropa.py`, which:
-
-    1. Generates \$x\_{\text{target}}\$ via SDXL for each prompt.
-    2. Extracts \$f\_v(x\_{\text{target}})\$ and solves \$\delta\_{\text{init}}\$ (Eq. 7).
-    3. Runs CroPA starting from \$x + \delta\_{\text{init}}\$.
-
-#### CroPA + SCMix (Universal)
-
-```bash
-bash src/evaluate/eval_uap_sc.sh \
-    --model flamingo \
-    --images_dir data/images \
-    --prompts data/prompts.txt \
-    --iter 1700 \
-    --eps 16/255 \
-    --step 1/255 \
-    --beta1 0.9 \
-    --beta2 0.1
-```
-
-* Internally, `uap_sc_mix.py` forms mixed images on the fly, optimizing a single universal \$\delta\$.
-
-#### CroPA + CutMix (Universal)
-
-```bash
-bash src/evaluate/eval_uap_cm.sh \
-    --model blip2 \
-    --images_dir data/images \
-    --prompts data/prompts.txt \
-    --iter 1600 \
-    --eps 16/255 \
-    --step 1/255 \
-    --beta_alpha 1.0
-```
-
-* Internally, `uap_cutmix.py` randomly samples rectangular masks per batch.
-
-#### CroPA + D-UAP (Value-Vector)
-
-```bash
-bash src/evaluate/eval_duap.sh \
-    --model blip2 \
-    --images_dir data/images \
-    --prompts data/prompts.txt \
-    --iter 2000 \
-    --eps 16/255 \
-    --step 1/255 \
-    --n_prompt_updates 10 \
-    --lambda 0.5 \
-    --layer_idx 11 \
-    --num_heads 16 \
-    --ref_images_dir data/images  # or data/ref_images/ if pre-generated
-```
-
-* **Arguments**:
-
-  * `--lambda`: Weight for D-UAP loss.
-  * `--layer_idx`: Which vision-encoder layer’s value vectors to target (0-based).
-  * `--num_heads`: Number of attention heads to aggregate (usually all).
-  * `--ref_images_dir`: Directory containing reference images \$x\_{\text{ref}}\$ for each prompt (generated via SDXL).
-
----
-
-### Evaluation Scripts
-
-* After adversarial images are generated, run the provided evaluation scripts to measure ASR on **held-out test set** (50 images not used in training).
-* Example (Evaluating CroPA + D-UAP on LLaVA):
-
-  ```bash
-  python src/utils/eval_metrics.py \
-    --adv_images_dir results/duap/llava/adv_images/ \
-    --clean_images_dir data/test_images/ \
-    --prompts data/prompts.txt \
-    --model llava \
-    --targeted
-  ```
-* Results are saved to `<adv_images_dir>/asr_report.csv`.
 
 ---
 

@@ -1,0 +1,1 @@
+./run_algorithm.sh --algorithm=cropa --prompt_file=./prompt.txt --model_name=blip2
