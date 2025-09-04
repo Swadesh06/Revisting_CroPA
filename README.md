@@ -1,4 +1,4 @@
-# Revisiting CroPA: A Reproducibility Study and Enhancements for Cross-Prompt Adversarial Transferability in Vision-Language Models
+# [BEST PAPER AWARD MLRC 25] Revisiting CroPA: A Reproducibility Study and Enhancements for Cross-Prompt Adversarial Transferability in Vision-Language Models
 
 [![MLRC](https://img.shields.io/badge/MLRC-red)](#)
 [![TMLR](https://img.shields.io/badge/TMLR-blue)](#)
